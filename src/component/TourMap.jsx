@@ -2,9 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 
-// open street map
-
-// Simple icon components
+// Simple icon components (same as before)
 const MapPinIcon = () => (
   <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
     <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
@@ -52,11 +50,10 @@ const AllPlacesIcon = () => (
 
 const TourMap = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
-  const [hoveredPlace, setHoveredPlace] = useState(null);
   const [map, setMap] = useState(null);
   const [markers, setMarkers] = useState([]);
   const mapRef = useRef(null);
-  const infoWindowRef = useRef(null);
+  const mapInstanceRef = useRef(null);
   
   // Sample database structure - Admin can add/modify these
   const places = [
@@ -105,111 +102,105 @@ const TourMap = () => {
 
   const currentCategory = categories.find(c => c.id === selectedCategory);
 
-  // Load Google Maps Script
+  // Load Leaflet CSS and JS
   useEffect(() => {
-    const loadGoogleMaps = () => {
-      if (window.google && window.google.maps) {
-        initMap();
-        return;
-      }
+    // Load Leaflet CSS
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    link.integrity = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+    link.crossOrigin = '';
+    document.head.appendChild(link);
 
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=AIzaSyDzZmJfdw2iWpooECmJYFgdg-nhMTwqgIc`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => initMap();
-      document.head.appendChild(script);
+    // Load Leaflet JS
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.integrity = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+    script.crossOrigin = '';
+    script.onload = () => {
+      // Initialize map after Leaflet is loaded
+      setTimeout(initMap, 100);
     };
+    document.head.appendChild(script);
 
-    loadGoogleMaps();
+    return () => {
+      // Cleanup
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+      }
+    };
   }, []);
 
   const initMap = () => {
-    if (!mapRef.current || !window.google) return;
+    if (!mapRef.current || !window.L) return;
 
-    const newMap = new window.google.maps.Map(mapRef.current, {
-      center: { lat: 7.8731, lng: 80.7718 }, // Center of Sri Lanka
-      zoom: 8,
-      styles: [
-        {
-          featureType: "water",
-          elementType: "geometry",
-          stylers: [{ color: "#a2daf2" }]
-        },
-        {
-          featureType: "landscape",
-          elementType: "geometry",
-          stylers: [{ color: "#e5f5e0" }]
-        }
-      ],
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: true,
-    });
+    // Initialize the map
+    const newMap = window.L.map(mapRef.current).setView([7.8731, 80.7718], 8);
+
+    // Add OpenStreetMap tiles
+    window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 18,
+    }).addTo(newMap);
 
     setMap(newMap);
-    infoWindowRef.current = new window.google.maps.InfoWindow();
+    mapInstanceRef.current = newMap;
   };
 
   // Update markers when category changes
   useEffect(() => {
-    if (!map || !window.google) return;
+    if (!map) return;
 
     // Clear existing markers
-    markers.forEach(marker => marker.setMap(null));
+    markers.forEach(marker => {
+      map.removeLayer(marker);
+    });
+
+    // Create custom icon
+    const createCustomIcon = (color) => {
+      return window.L.divIcon({
+        html: `
+          <div style="
+            background-color: ${color};
+            width: 20px;
+            height: 20px;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+          "></div>
+        `,
+        className: 'custom-marker',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+      });
+    };
 
     // Create new markers
     const newMarkers = filteredPlaces.map(place => {
-      const marker = new window.google.maps.Marker({
-        position: { lat: place.lat, lng: place.lng },
-        map: map,
-        title: place.name,
-        icon: {
-          path: window.google.maps.SymbolPath.CIRCLE,
-          fillColor: currentCategory.color,
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3,
-          scale: 10,
-        },
-        animation: window.google.maps.Animation.DROP,
+      const marker = window.L.marker([place.lat, place.lng], {
+        icon: createCustomIcon(currentCategory.color),
+      }).addTo(map);
+
+      // Add popup
+      marker.bindPopup(`
+        <div style="padding: 8px; max-width: 200px;">
+          <h3 style="margin: 0 0 6px 0; font-weight: bold; color: ${currentCategory.color};">
+            ${place.name}
+          </h3>
+          <p style="margin: 0; font-size: 13px; color: #666;">
+            ${place.description}
+          </p>
+        </div>
+      `);
+
+      // Add hover effects
+      marker.on('mouseover', function () {
+        this.openPopup();
+        // You can add additional hover effects here
       });
 
-      marker.addListener('click', () => {
-        const content = `
-          <div style="padding: 10px; max-width: 200px;">
-            <h3 style="margin: 0 0 8px 0; font-weight: bold; color: ${currentCategory.color};">
-              ${place.name}
-            </h3>
-            <p style="margin: 0; font-size: 14px; color: #666;">
-              ${place.description}
-            </p>
-          </div>
-        `;
-        infoWindowRef.current.setContent(content);
-        infoWindowRef.current.open(map, marker);
-      });
-
-      marker.addListener('mouseover', () => {
-        marker.setIcon({
-          path: window.google.maps.SymbolPath.CIRCLE,
-          fillColor: currentCategory.color,
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3,
-          scale: 14,
-        });
-      });
-
-      marker.addListener('mouseout', () => {
-        marker.setIcon({
-          path: window.google.maps.SymbolPath.CIRCLE,
-          fillColor: currentCategory.color,
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3,
-          scale: 10,
-        });
+      marker.on('mouseout', function () {
+        this.closePopup();
       });
 
       return marker;
@@ -219,15 +210,8 @@ const TourMap = () => {
 
     // Adjust map bounds to fit all markers
     if (newMarkers.length > 0) {
-      const bounds = new window.google.maps.LatLngBounds();
-      newMarkers.forEach(marker => bounds.extend(marker.getPosition()));
-      map.fitBounds(bounds);
-      
-      // Don't zoom in too much for single marker
-      const listener = window.google.maps.event.addListener(map, "idle", function() {
-        if (map.getZoom() > 10) map.setZoom(10);
-        window.google.maps.event.removeListener(listener);
-      });
+      const group = new window.L.featureGroup(newMarkers);
+      map.fitBounds(group.getBounds().pad(0.1));
     }
 
   }, [map, selectedCategory, filteredPlaces.length]);
@@ -293,20 +277,14 @@ const TourMap = () => {
           </div>
         </div>
 
-        {/* Admin Instructions */}
-        <div className="mt-8 bg-blue-50 border border-blue-200 rounded-xl p-6">
-          <h3 className="font-bold text-blue-900 mb-2">🔑 Setup Instructions</h3>
-          <p className="text-sm text-blue-800 mb-3">
-            To use this component, you need a Google Maps API key:
+        {/* Admin Instructions - Updated for OpenStreetMap */}
+        <div className="mt-8 bg-green-50 border border-green-200 rounded-xl p-6">
+          <h3 className="font-bold text-green-900 mb-2">✅ Free & Open Source</h3>
+          <p className="text-sm text-green-800 mb-3">
+            This map uses OpenStreetMap and Leaflet - completely free, no API key required!
           </p>
-          <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
-            <li>Go to <a href="https://console.cloud.google.com/" target="_blank" className="underline font-semibold">Google Cloud Console</a></li>
-            <li>Create a project and enable "Maps JavaScript API"</li>
-            <li>Get your API key from Credentials section</li>
-            <li>Replace <code className="bg-white px-2 py-1 rounded">YOUR_API_KEY_HERE</code> in the code with your actual API key</li>
-          </ol>
           
-          <h3 className="font-bold text-blue-900 mb-2 mt-4">📍 Admin Panel - Database Structure</h3>
+          <h3 className="font-bold text-green-900 mb-2 mt-4">📍 Admin Panel - Database Structure</h3>
           <div className="bg-white rounded p-3 font-mono text-xs overflow-x-auto">
             <pre>{`{
   "name": "Place Name",
@@ -316,7 +294,7 @@ const TourMap = () => {
   "description": "Short description"
 }`}</pre>
           </div>
-          <p className="text-sm text-blue-800 mt-3">
+          <p className="text-sm text-green-800 mt-3">
             💡 Get coordinates: Right-click any location on Google Maps → Click the coordinates to copy!
           </p>
         </div>
